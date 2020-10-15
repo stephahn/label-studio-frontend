@@ -1,11 +1,11 @@
 import React from "react";
 import { observer, inject } from "mobx-react";
-import { types, getParent, getParentOfType, getRoot } from "mobx-state-tree";
+import { types, getParentOfType } from "mobx-state-tree";
 
+import { Typography } from "antd";
 import { DeleteOutlined } from "@ant-design/icons";
 
 import WithStatesMixin from "../mixins/WithStates";
-import Constants from "../core/Constants";
 import NormalizationMixin from "../mixins/Normalization";
 import RegionsMixin from "../mixins/Regions";
 import Registry from "../core/Registry";
@@ -13,6 +13,8 @@ import { TextAreaModel } from "../tags/control/TextArea";
 import { guidGenerator } from "../core/Helpers";
 
 import styles from "./TextAreaRegion/TextAreaRegion.module.scss";
+
+const { Paragraph } = Typography;
 
 const Model = types
   .model("TextAreaRegionModel", {
@@ -27,10 +29,14 @@ const Model = types
     get parent() {
       return getParentOfType(self, TextAreaModel);
     },
+    get regionElement() {
+      return document.querySelector(`#TextAreaRegion-${self.id}`);
+    },
   }))
   .actions(self => ({
     setValue(val) {
       self._value = val;
+      self.parent.onChange();
     },
   }));
 
@@ -62,14 +68,6 @@ const HtxTextAreaRegionView = ({ store, item }) => {
     params["editable"] = {
       onChange: str => {
         item.setValue(str);
-
-        // here we update the parent object's state
-        if (parent.perregion) {
-          const reg = item.completion.highlightedNode;
-          reg && reg.updateSingleState(parent);
-
-          // self.regions = [];
-        }
       },
     };
   }
@@ -77,7 +75,6 @@ const HtxTextAreaRegionView = ({ store, item }) => {
   let divAttrs = {};
   if (!parent.perregion) {
     divAttrs = {
-      onClick: item.onClickRegion,
       onMouseOver: () => {
         if (relationMode) {
           item.setHighlight(true);
@@ -94,23 +91,10 @@ const HtxTextAreaRegionView = ({ store, item }) => {
 
   return (
     <div {...divAttrs} className={styles.row} data-testid="textarea-region">
-      <p className={classes.join(" ")} {...params}>
+      <Paragraph id={`TextAreaRegion-${item.id}`} className={classes.join(" ")} {...params}>
         {item._value}
-      </p>
-      {parent.perregion && (
-        <DeleteOutlined
-          className={styles.delete}
-          onClick={ev => {
-            const reg = item.completion.highlightedNode;
-            item.completion.deleteRegion(item);
-
-            reg && reg.updateSingleState(parent);
-
-            ev.preventDefault();
-            return false;
-          }}
-        />
-      )}
+      </Paragraph>
+      {parent.perregion && <DeleteOutlined className={styles.delete} onClick={() => item.parent.remove(item)} />}
     </div>
   );
 };

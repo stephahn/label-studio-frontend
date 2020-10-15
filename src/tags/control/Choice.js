@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Component } from "react";
 import { Checkbox, Radio, Form } from "antd";
 import { observer, inject } from "mobx-react";
 import { types, getParentOfType, getRoot } from "mobx-state-tree";
@@ -47,6 +47,11 @@ const Model = types
       return choice === "multiple" || choice === "single";
     },
 
+    get isSelect() {
+      console.log(self.parent.layout);
+      return self.parent.layout === "select";
+    },
+
     get completion() {
       return getRoot(self).completionStore.selected;
     },
@@ -64,22 +69,11 @@ const Model = types
     toggleSelected() {
       const choices = self.parent;
 
-      choices.shouldBeUnselected && choices.unselectAll();
+      choices.shouldBeUnselected && choices.resetSelected();
 
       self.setSelected(!self.selected);
 
-      const reg = self.completion.highlightedNode;
-
-      // if (reg) {
-      //     const sel = self.parent.selectedLabels;
-      //     if (sel.length === 1 && sel[0]._value === self._value) return;
-      // }
-
-      // choice is toggled, we need to check if we need to update
-      // the currently selected region
-      if (reg && choices.perregion && reg.parent.name === choices.toname) {
-        reg.updateOrAddState(choices);
-      }
+      choices.updateResult();
     },
 
     setVisible(val) {
@@ -97,8 +91,9 @@ const Model = types
 
 const ChoiceModel = types.compose("ChoiceModel", TagAttrs, Model, ProcessAttrsMixin);
 
-const HtxChoice = inject("store")(
-  observer(({ item, store }) => {
+class HtxChoiceView extends Component {
+  render() {
+    const { item, store } = this.props;
     let style = {};
 
     if (item.style) style = Tree.cssConverter(item.style);
@@ -107,52 +102,46 @@ const HtxChoice = inject("store")(
       style["display"] = "none";
     }
 
+    const showHotkey =
+      (store.settings.enableTooltips || store.settings.enableLabelTooltips) &&
+      store.settings.enableHotkeys &&
+      item.hotkey;
+
+    const props = {
+      checked: item.selected,
+      disabled: item.parent.readonly,
+      onChange: ev => {
+        if (!item.completion.editable) return;
+        item.toggleSelected();
+        ev.nativeEvent.target.blur();
+      },
+    };
+
     if (item.isCheckbox) {
       const cStyle = Object.assign({ display: "flex", alignItems: "center", marginBottom: 0 }, style);
 
       return (
         <Form.Item style={cStyle}>
-          <Checkbox
-            disabled={item.parent.readonly}
-            name={item._value}
-            onChange={ev => {
-              if (!item.completion.editable) return;
-              item.toggleSelected();
-              ev.nativeEvent.target.blur();
-            }}
-            checked={item.selected}
-          >
+          <Checkbox name={item._value} {...props}>
             {item._value}
-            {store.settings.enableTooltips && store.settings.enableHotkeys && item.hotkey && (
-              <Hint>[{item.hotkey}]</Hint>
-            )}
+            {showHotkey && <Hint>[{item.hotkey}]</Hint>}
           </Checkbox>
         </Form.Item>
       );
     } else {
       return (
         <div style={style}>
-          <Radio
-            disabled={item.parent.readonly}
-            value={item._value}
-            style={{ display: "inline-block", marginBottom: "0.5em" }}
-            checked={item.selected}
-            onChange={ev => {
-              if (!item.completion.editable) return;
-              item.toggleSelected();
-              ev.nativeEvent.target.blur();
-            }}
-          >
+          <Radio value={item._value} style={{ display: "inline-block", marginBottom: "0.5em" }} {...props}>
             {item._value}
-            {(store.settings.enableTooltips || store.settings.enableLabelTooltips) &&
-              store.settings.enableHotkeys &&
-              item.hotkey && <Hint>[{item.hotkey}]</Hint>}
+            {showHotkey && <Hint>[{item.hotkey}]</Hint>}
           </Radio>
         </div>
       );
     }
-  }),
-);
+  }
+}
+
+const HtxChoice = inject("store")(observer(HtxChoiceView));
 
 Registry.addTag("choice", ChoiceModel, HtxChoice);
 

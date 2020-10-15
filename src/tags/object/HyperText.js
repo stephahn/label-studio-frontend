@@ -9,27 +9,36 @@ import ObjectTag from "../../components/Tags/Object";
 import RegionsMixin from "../../mixins/Regions";
 import Registry from "../../core/Registry";
 import { HyperTextRegionModel } from "../../regions/HyperTextRegion";
-import { cloneNode } from "../../core/Helpers";
-import { guidGenerator, restoreNewsnapshot } from "../../core/Helpers";
+import { restoreNewsnapshot, guidGenerator } from "../../core/Helpers";
 import { splitBoundaries } from "../../utils/html";
 import { runTemplate } from "../../core/Template";
-import InfoModal from "../../components/Infomodal/Infomodal";
+import { customTypes } from "../../core/CustomTypes";
 
 /**
  * HyperText tag shows an HyperText markup that can be labeled
  * @example
- * <HyperText name="text-1" value="$text" />
+ * <View>
+ *   <HyperText name="text-1" value="$text" />
+ * </View>
  * @name HyperText
  * @param {string} name - name of the element
  * @param {string} value - value of the element
  * @param {boolean} [showLabels=false] - show labels next to the region
  * @param {string} [encoding=none|base64|base64unicode]  - decode value from encoded string
+ * @param {boolean} [clickableLinks=false] - allow to open resources from links
  */
 const TagAttrs = types.model("HyperTextModel", {
-  name: types.maybeNull(types.string),
+  // opional for cases with inline html: <HyperText><hr/></HyperText>
+  name: types.optional(types.identifier, guidGenerator(5)),
   value: types.maybeNull(types.string),
 
-  highlightcolor: types.maybeNull(types.string),
+  // @todo add `valueType=url` to HyperText and make autodetection of `savetextresult`
+  savetextresult: types.optional(types.enumeration(["none", "no", "yes"]), () =>
+    window.LS_SECURE_MODE ? "no" : "yes",
+  ),
+  clickablelinks: false,
+
+  highlightcolor: types.maybeNull(customTypes.color),
   showlabels: types.optional(types.boolean, false),
 
   encoding: types.optional(types.enumeration(["none", "base64", "base64unicode"]), "none"),
@@ -37,9 +46,7 @@ const TagAttrs = types.model("HyperTextModel", {
 
 const Model = types
   .model("HyperTextModel", {
-    id: types.optional(types.identifier, guidGenerator),
     type: "hypertext",
-    regions: types.array(HyperTextRegionModel),
     _value: types.optional(types.string, ""),
     _update: types.optional(types.number, 1),
   })
@@ -51,6 +58,10 @@ const Model = types
 
     get completion() {
       return getRoot(self).completionStore.selected;
+    },
+
+    get regs() {
+      return self.completion.regionStore.regions.filter(r => r.object === self);
     },
 
     states() {
@@ -93,11 +104,11 @@ const Model = types
       const states = self.getAvailableStates();
       if (states.length === 0) return;
 
-      const clonedStates = states.map(s => cloneNode(s));
-
-      const r = self.createRegion({ ...range, states: clonedStates });
-
-      return r;
+      const control = states[0];
+      const labels = { [control.valueType]: control.selectedValues() };
+      const area = self.completion.createResult(range, labels, control, self);
+      area._range = range._range;
+      return area;
     },
 
     /**
@@ -116,6 +127,7 @@ const Model = types
       const states = restoreNewsnapshot(fromModel);
       const tree = {
         pid: obj.id,
+        parentID: obj.parent_id === null ? "" : obj.parent_id,
         startOffset: startOffset,
         endOffset: endOffset,
         start: start,
@@ -216,7 +228,12 @@ class HyperTextPieceView extends Component {
     const root = this.myRef.current;
     const { item } = this.props;
 
-    item.regions.forEach(function(r) {
+    item.regs.forEach(function(r) {
+      // spans can be totally missed if this is app init or undo/redo
+      // or they can be disconnected from DOM on completions switching
+      // so we have to recreate them from regions data
+      if (r._spans?.[0]?.isConnected) return;
+
       try {
         const range = xpath.toRange(r.start, r.startOffset, r.end, r.endOffset, root);
 
@@ -230,12 +247,14 @@ class HyperTextPieceView extends Component {
       }
     });
 
-    Array.from(this.myRef.current.getElementsByTagName("a")).forEach(a => {
-      a.addEventListener("click", function(ev) {
-        ev.preventDefault();
-        return false;
+    if (!item.clickablelinks) {
+      Array.from(this.myRef.current.getElementsByTagName("a")).forEach(a => {
+        a.addEventListener("click", function(ev) {
+          ev.preventDefault();
+          return false;
+        });
       });
-    });
+    }
   }
 
   componentDidUpdate() {
@@ -271,5 +290,6 @@ const HtxHyperText = inject("store")(observer(HtxHyperTextView));
 const HtxHyperTextPieceView = inject("store")(observer(HyperTextPieceView));
 
 Registry.addTag("hypertext", HyperTextModel, HtxHyperText);
+Registry.addObjectType(HyperTextModel);
 
 export { HyperTextModel, HtxHyperText };

@@ -1,11 +1,15 @@
 import React, { Fragment } from "react";
-import { Popover, Select, Divider, List, Button, Dropdown, Menu } from "antd";
+import { Select, Divider, List, Button } from "antd";
 import { isValidReference, getRoot } from "mobx-state-tree";
 import { observer } from "mobx-react";
 import { ArrowLeftOutlined, ArrowRightOutlined, SwapOutlined, MoreOutlined, DeleteOutlined } from "@ant-design/icons";
 
 import styles from "./Relations.module.scss";
 import { NodeMinimal } from "../Node/Node";
+import { wrapArray } from "../../utils/utilities";
+import globalStyles from "../../styles/global.module.scss";
+
+import { EyeInvisibleOutlined, EyeOutlined } from "@ant-design/icons";
 
 const { Option } = Select;
 
@@ -22,8 +26,9 @@ const RelationMeta = observer(({ store, rl }) => {
         placeholder="Please select"
         defaultValue={selected}
         onChange={(val, option) => {
+          const values = wrapArray(val);
           r.unselectAll();
-          val.forEach(v => r.findRelation(v).setSelected(true));
+          values.forEach(v => r.findRelation(v).setSelected(true));
         }}
       >
         {r.children.map(c => (
@@ -78,11 +83,13 @@ const ListItem = observer(({ item }) => {
       className={isSelected && styles.selected}
       key={item.id}
       actions={[]}
-      onMouseOver={() => {
+      onMouseEnter={() => {
         item.toggleHighlight();
+        item.setSelfHighlight(true);
       }}
-      onMouseOut={() => {
+      onMouseLeave={() => {
         item.toggleHighlight();
+        item.setSelfHighlight(false);
       }}
     >
       <div className={styles.item}>
@@ -125,15 +132,42 @@ const ListItem = observer(({ item }) => {
 export default observer(({ store }) => {
   const completion = store.completionStore.selected;
   const { relations } = completion.relationStore;
+  const hasRelations = relations.length > 0;
+  const relationsUIVisible = completion.relationStore.showConnections;
 
   return (
     <Fragment>
-      <Divider dashed orientation="left">
-        Relations ({relations.length})
-      </Divider>
-      {!relations.length && <p>No Relations added yet</p>}
+      {/* override LS styles' height */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          paddingLeft: "4px",
+          paddingRight: "4px",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ flex: 1, paddingRight: 10 }}>
+          <Divider dashed orientation="left" style={{ height: "auto" }}>
+            Relations ({relations.length})
+          </Divider>
+        </div>
+        {hasRelations && (
+          <div>
+            <Button
+              size="small"
+              type="link"
+              icon={relationsUIVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={() => completion.relationStore.toggleConnections()}
+              className={[relationsUIVisible ? styles.uihidden : styles.uivisible, globalStyles.link]}
+            />
+          </div>
+        )}
+      </div>
 
-      {relations.length > 0 && (
+      {!hasRelations && <p>No Relations added yet</p>}
+
+      {hasRelations && (
         <List
           size="small"
           bordered

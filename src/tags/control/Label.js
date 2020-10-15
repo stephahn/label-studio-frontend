@@ -13,6 +13,7 @@ import Utils from "../../utils";
 import { guidGenerator } from "../../core/Helpers";
 import { runTemplate } from "../../core/Template";
 import InfoModal from "../../components/Infomodal/Infomodal";
+import { customTypes } from "../../core/CustomTypes";
 
 /**
  * Label tag represents a single label
@@ -35,6 +36,7 @@ import InfoModal from "../../components/Infomodal/Infomodal";
  * @param {string} [size=medium]            - size of text in the label
  * @param {string} [background]             - background color of an active label
  * @param {string} [selectedColor]          - color of text in an active label
+ * @param {symbol|word} [granularity]       - control per symbol or word selection (only for Text)
  */
 const TagAttrs = types.model({
   value: types.maybeNull(types.string),
@@ -45,8 +47,9 @@ const TagAttrs = types.model({
   showalias: types.optional(types.boolean, false),
   aliasstyle: types.optional(types.string, "opacity: 0.6"),
   size: types.optional(types.string, "medium"),
-  background: types.optional(types.string, Constants.LABEL_BACKGROUND),
-  selectedcolor: types.optional(types.string, "white"),
+  background: types.optional(customTypes.color, Constants.LABEL_BACKGROUND),
+  selectedcolor: types.optional(customTypes.color, "#ffffff"),
+  granularity: types.maybeNull(types.enumeration(["symbol", "word", "sentence", "paragraph"])),
 });
 
 const Model = types
@@ -68,7 +71,7 @@ const Model = types
     usedAlready() {
       const regions = self.completion.regionStore.regions;
       // count all the usages among all the regions
-      const used = regions.reduce((s, r) => s + r.hasLabelState(self.value), 0);
+      const used = regions.reduce((s, r) => s + r.hasLabel(self.value), 0);
       return used;
     },
 
@@ -98,7 +101,8 @@ const Model = types
       // connected to the region on the same object tag that is
       // right now highlighted, and if that region is readonly
       const region = self.completion.highlightedNode;
-      if (region && region.readonly === true && region.parent.name === self.parent.toname) return;
+      const sameObject = region && region.parent.name === self.parent.toname;
+      if (region && region.readonly === true && sameObject) return;
 
       // one more check if that label can be selected
       if (!self.completion.editable) return;
@@ -114,9 +118,8 @@ const Model = types
       // check if there is a region selected and if it is and user
       // is changing the label we need to make sure that region is
       // not going to endup without the label(s) at all
-      if (region) {
-        const sel = labels.selectedLabels;
-        if (sel.length === 1 && sel[0]._value === self._value) return;
+      if (region && sameObject) {
+        if (labels.selectedLabels.length === 1 && self.selected) return;
       }
 
       // if we are going to select label and it would be the first in this labels group
@@ -124,7 +127,8 @@ const Model = types
         // unselect labels from other groups of labels connected to this obj
         self.completion.toNames
           .get(labels.toname)
-          .forEach(tag => tag.name !== labels.name && tag.unselectAll && tag.unselectAll());
+          .filter(tag => tag.type && tag.type.endsWith("labels") && tag.name !== labels.name)
+          .forEach(tag => tag.unselectAll && tag.unselectAll());
 
         // unselect other tools if they exist and selected
         const tool = Object.values(self.parent.tools || {})[0];
@@ -156,7 +160,7 @@ const Model = types
         }
       }
 
-      region && region.updateSingleState(labels);
+      region && sameObject && region.setValue(self.parent);
     },
 
     setVisible(val) {
@@ -189,17 +193,14 @@ const Model = types
     },
   }));
 
-const LabelModel = types.compose(
-  "LabelModel",
-  TagAttrs,
-  Model,
-  ProcessAttrsMixin,
-);
+const LabelModel = types.compose("LabelModel", TagAttrs, Model, ProcessAttrsMixin);
 
 const HtxLabelView = inject("store")(
   observer(({ item, store }) => {
     const bg = item.background;
     const labelStyle = {
+      borderLeftWidth: 3,
+      borderLeftColor: bg,
       backgroundColor: item.selected ? bg : "#e8e8e8",
       color: item.selected ? item.selectedcolor : "#333333",
       cursor: "pointer",
@@ -208,6 +209,12 @@ const HtxLabelView = inject("store")(
 
     if (!item.visible) {
       labelStyle["display"] = "none";
+    }
+
+    if (item.selected) {
+      labelStyle.borderTopColor = bg;
+      labelStyle.borderBottomColor = bg;
+      labelStyle.borderRightColor = bg;
     }
 
     return (

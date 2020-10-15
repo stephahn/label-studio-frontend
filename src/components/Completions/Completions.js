@@ -1,10 +1,32 @@
 import React, { Component } from "react";
 import { Card, Button, Tooltip, Badge, List, Popconfirm } from "antd";
 import { observer } from "mobx-react";
-import { StarOutlined, DeleteOutlined, PlusCircleOutlined, WindowsOutlined, PlusOutlined } from "@ant-design/icons";
+import { StarOutlined, DeleteOutlined, ForwardOutlined, WindowsOutlined, PlusOutlined } from "@ant-design/icons";
 
 import Utils from "../../utils";
 import styles from "./Completions.module.scss";
+
+export const DraftPanel = observer(({ item }) => {
+  if (!item.draftSaved && !item.versions.draft) return null;
+  const saved = item.draft && item.draftSaved ? ` saved ${Utils.UDate.prettyDate(item.draftSaved)}` : "";
+  if (!item.selected) {
+    if (!item.draft) return null;
+    return <div>draft{saved}</div>;
+  }
+  if (!item.versions.result || !item.versions.result.length) {
+    return <div>{saved ? `draft${saved}` : "not submitted draft"}</div>;
+  }
+  return (
+    <div>
+      <Tooltip placement="topLeft" title={item.draft ? "switch to submitted result" : "switch to current draft"}>
+        <Button type="link" onClick={item.toggleDraft} className={styles.draftbtn}>
+          {item.draft ? "draft" : "submitted"}
+        </Button>
+      </Tooltip>
+      {saved}
+    </div>
+  );
+});
 
 const Completion = observer(({ item, store }) => {
   let removeHoney = () => (
@@ -84,6 +106,7 @@ const Completion = observer(({ item, store }) => {
 
     return (
       <div className={styles.buttons}>
+        {/* @todo check for honeypot/ground truth interface */}
         {true && (item.honeypot ? removeHoney() : setHoney())}
         &nbsp;
         {store.hasInterface("completions:delete") && (
@@ -123,7 +146,14 @@ const Completion = observer(({ item, store }) => {
           Created
           <i>{item.createdAgo ? ` ${item.createdAgo} ago` : ` ${Utils.UDate.prettyDate(item.createdDate)}`}</i>
           {item.createdBy ? ` by ${item.createdBy}` : null}
+          <DraftPanel item={item} />
         </div>
+        {/* platform uses was_cancelled so check both */}
+        {store.hasInterface("skip") && (item.skipped || item.was_cancelled) && (
+          <Tooltip placement="topLeft" title="Skipped completion">
+            <ForwardOutlined className={styles.skipped} />
+          </Tooltip>
+        )}
         {item.selected && btnsView()}
       </div>
     </List.Item>

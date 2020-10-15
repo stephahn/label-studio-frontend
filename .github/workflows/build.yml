@@ -2,9 +2,7 @@ name: Build and Test
 
 on:
   push:
-    branches: [master]
-  pull_request:
-    types: [opened, synchronize]
+    branches: [master, "*/*"]
 
 jobs:
   build:
@@ -51,5 +49,5 @@ jobs:
     # upload this build as artifact to current Action
     - uses: actions/upload-artifact@master
       with:
-        name: build ${{github.sha}}
+        name: build ${{ github.event.pull_request.head.sha || github.sha }}
         path: build/

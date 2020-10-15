@@ -1,27 +1,91 @@
 import { types, getParent, getEnv, onPatch } from "mobx-state-tree";
 
 import Hotkey from "../core/Hotkey";
-import { AllRegionsType } from "../regions";
 
 export default types
   .model("RegionStore", {
-    regions: types.array(types.safeReference(AllRegionsType)),
-
     sort: types.optional(types.enumeration(["date", "score"]), "date"),
     sortOrder: types.optional(types.enumeration(["asc", "desc"]), "desc"),
 
     group: types.optional(types.enumeration(["type", "label"]), "type"),
+
+    view: types.optional(types.enumeration(["regions", "labels"]), "regions"),
   })
   .views(self => ({
+    get completion() {
+      return getParent(self);
+    },
+
+    get regions() {
+      return Array.from(self.completion.areas.values()).filter(area => !area.classification);
+    },
+
     get sortedRegions() {
       const sorts = {
         date: () => self.regions,
-        score: () => self.regions.sort((a, b) => a.score - b.score),
+        score: () => self.regions.sort((a, b) => b.score - a.score),
       };
 
-      return sorts[self.sort]();
-      // TODO
-      // return (self.sortOrder === 'asc') ? r.slice().reverse() : r;
+      const r = sorts[self.sort]();
+      return self.sortOrder === "asc" ? r.slice().reverse() : r;
+    },
+
+    asTree(enrich) {
+      // every region has a parentID
+      // parentID is an empty string - "" if it's top level
+      // or it can contain a string key to the parent region
+      // [ { id: "1", parentID: "" }, { id: "2", parentID: "1" } ]
+      // would create a tree of two elements
+
+      const arr = self.sortedRegions;
+      const tree = [],
+        lookup = {};
+
+      arr.forEach((el, idx) => {
+        lookup[el.pid] = enrich(el, idx);
+        lookup[el.pid]["item"] = el;
+        lookup[el.pid]["children"] = [];
+      });
+
+      Object.keys(lookup).forEach(key => {
+        const el = lookup[key];
+        if (el["item"].parentID) {
+          lookup[el["item"].parentID]["children"].push(el);
+        } else {
+          tree.push(el);
+        }
+      });
+
+      return tree;
+    },
+
+    asLabelsTree(enrich) {
+      // collect all label states into two maps
+      const labels = {};
+      const map = {};
+      self.regions.forEach(r => {
+        const l = r.labeling;
+        if (l) {
+          const selected = l.selectedLabels;
+          selected &&
+            selected.forEach(s => {
+              labels[s._value] = s;
+              if (s._value in map) map[s._value].push(r);
+              else map[s._value] = [r];
+            });
+        }
+      });
+
+      // create the tree
+      let idx = 0;
+      const tree = Object.keys(labels).map(lname => {
+        const el = enrich(labels[lname], idx, true);
+        el["children"] = map[lname].map(r => enrich(r, idx++));
+
+        return el;
+      });
+
+      return tree;
     },
   }))
   .actions(self => ({
@@ -35,9 +99,17 @@ export default types
       else self.sortOrder = "asc";
     },
 
+    setView(view) {
+      self.view = view;
+    },
+
     setSort(sort) {
-      self.sortOrder = "desc";
-      self.sort = sort;
+      if (self.sort === sort) {
+        self.toggleSortOrder();
+      } else {
+        self.sortOrder = "desc";
+        self.sort = sort;
+      }
       self.initHotkeys();
     },
 
@@ -52,6 +124,10 @@ export default types
     deleteRegion(region) {
       const arr = self.regions;
 
+      // find regions that have that region as a parent
+      const children = self.filterByParentID(region.pid);
+      children && children.forEach(r => r.setParentID(region.parentID));
+
       for (let i = 0; i < arr.length; i++) {
         if (arr[i] === region) {
           arr.splice(i, 1);
@@ -62,8 +138,16 @@ export default types
       self.initHotkeys();
     },
 
+    findRegionID(id) {
+      return self.regions.find(r => r.id === id);
+    },
+
     findRegion(pid) {
       return self.regions.find(r => r.pid === pid);
+    },
+
+    filterByParentID(id) {
+      return self.regions.filter(r => r.parentID === id);
     },
 
     afterCreate() {
@@ -98,8 +182,7 @@ export default types
      * @param {boolean} tryToKeepStates try to keep states selected if such settings enabled
      */
     unselectAll(tryToKeepStates = false) {
-      self.regions.forEach(r => r.unselectRegion(tryToKeepStates));
-      getParent(self).setHighlightedNode(null);
+      self.completion.unselectAll();
     },
 
     unhighlightAll() {

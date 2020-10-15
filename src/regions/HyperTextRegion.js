@@ -1,33 +1,34 @@
-import { types, getRoot, getParentOfType } from "mobx-state-tree";
+import { types } from "mobx-state-tree";
 
 import NormalizationMixin from "../mixins/Normalization";
 import RegionsMixin from "../mixins/Regions";
 import SpanTextMixin from "../mixins/SpanText";
 import Utils from "../utils";
 import WithStatesMixin from "../mixins/WithStates";
-import { ChoicesModel } from "../tags/control/Choices";
-import { HyperTextLabelsModel } from "../tags/control/HyperTextLabels";
 import { HyperTextModel } from "../tags/object/HyperText";
-import { LabelsModel } from "../tags/control/Labels";
-import { RatingModel } from "../tags/control/Rating";
-import { TextAreaModel } from "../tags/control/TextArea";
 import { guidGenerator } from "../core/Helpers";
+import { AreaMixin } from "../mixins/AreaMixin";
+import Registry from "../core/Registry";
 
 const Model = types
   .model("HyperTextRegionModel", {
     id: types.optional(types.identifier, guidGenerator),
     pid: types.optional(types.string, guidGenerator),
     type: "hypertextregion",
+    object: types.late(() => types.reference(HyperTextModel)),
+
     startOffset: types.integer,
     start: types.string,
     endOffset: types.integer,
     end: types.string,
     text: types.string,
-    states: types.maybeNull(types.array(types.union(HyperTextLabelsModel, TextAreaModel, ChoicesModel, RatingModel))),
   })
   .views(self => ({
     get parent() {
-      return getParentOfType(self, HyperTextModel);
+      return self.object;
+    },
+    get regionElement() {
+      return self._spans[0];
     },
   }))
   .actions(self => ({
@@ -35,18 +36,19 @@ const Model = types
       Utils.HTML.removeSpans(self._spans);
     },
 
-    serialize(control, object) {
+    serialize() {
       let res = {
         value: {
           start: self.start,
           end: self.end,
-          text: self.text,
           startOffset: self.startOffset,
           endOffset: self.endOffset,
         },
       };
 
-      res.value = Object.assign(res.value, control.serializableValue);
+      if (self.object.savetextresult === "yes") {
+        res.value["text"] = self.text;
+      }
 
       return res;
     },
@@ -56,9 +58,12 @@ const HyperTextRegionModel = types.compose(
   "HyperTextRegionModel",
   WithStatesMixin,
   RegionsMixin,
+  AreaMixin,
   NormalizationMixin,
   Model,
   SpanTextMixin,
 );
+
+Registry.addRegionType(HyperTextRegionModel, "hypertext");
 
 export { HyperTextRegionModel };

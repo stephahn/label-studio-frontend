@@ -1,7 +1,7 @@
 import * as xpath from "xpath-range";
 import React, { Component } from "react";
 import { observer, inject } from "mobx-react";
-import { types, getType, getRoot } from "mobx-state-tree";
+import { types, getRoot } from "mobx-state-tree";
 
 import ObjectBase from "./Base";
 import ObjectTag from "../../components/Tags/Object";
@@ -9,17 +9,19 @@ import RegionsMixin from "../../mixins/Regions";
 import Registry from "../../core/Registry";
 import Utils from "../../utils";
 import { TextRegionModel } from "../../regions/TextRegion";
-import { cloneNode } from "../../core/Helpers";
-import { guidGenerator, restoreNewsnapshot } from "../../core/Helpers";
+import { restoreNewsnapshot } from "../../core/Helpers";
 import { splitBoundaries } from "../../utils/html";
 import { runTemplate } from "../../core/Template";
 import styles from "./Text/Text.module.scss";
 import InfoModal from "../../components/Infomodal/Infomodal";
+import { customTypes } from "../../core/CustomTypes";
 
 /**
  * Text tag shows an Text markup that can be labeled
  * @example
- * <Text name="text-1" value="$text" granularity="symbol" highlightColor="#ff0000" />
+ * <View>
+ *   <Text name="text-1" value="$text" granularity="symbol" highlightColor="#ff0000" />
+ * </View>
  * @name Text
  * @param {string} name                      - name of the element
  * @param {string} value                     - value of the element
@@ -30,16 +32,18 @@ import InfoModal from "../../components/Infomodal/Infomodal";
  * @param {string} [encoding=none|base64|base64unicode]  - decode value from encoded string
  */
 const TagAttrs = types.model("TextModel", {
-  name: types.maybeNull(types.string),
+  name: types.identifier,
   value: types.maybeNull(types.string),
 
-  valuetype: types.optional(types.enumeration(["text", "url"]), "text"),
+  valuetype: types.optional(types.enumeration(["text", "url"]), () => (window.LS_SECURE_MODE ? "url" : "text")),
 
-  savetextresult: types.optional(types.enumeration(["none", "no", "yes"]), "none"),
+  savetextresult: types.optional(types.enumeration(["none", "no", "yes"]), () =>
+    window.LS_SECURE_MODE ? "no" : "none",
+  ),
 
   selectionenabled: types.optional(types.boolean, true),
 
-  highlightcolor: types.maybeNull(types.string),
+  highlightcolor: types.maybeNull(customTypes.color),
   // matchlabel: types.optional(types.boolean, false),
 
   // [TODO]
@@ -52,10 +56,8 @@ const TagAttrs = types.model("TextModel", {
 
 const Model = types
   .model("TextModel", {
-    id: types.optional(types.identifier, guidGenerator),
     type: "text",
     loaded: types.optional(types.boolean, false),
-    regions: types.array(TextRegionModel),
     _value: types.optional(types.string, ""),
     _update: types.optional(types.number, 1),
   })
@@ -69,13 +71,17 @@ const Model = types
       return getRoot(self).completionStore.selected;
     },
 
+    get regs() {
+      return self.completion.regionStore.regions.filter(r => r.object === self);
+    },
+
     states() {
       return self.completion.toNames.get(self.name);
     },
 
     activeStates() {
       const states = self.states();
-      return states && states.filter(s => s.isSelected && s._type === "labels");
+      return states && states.filter(s => s.isSelected && s.type === "labels");
     },
   }))
   .actions(self => ({
@@ -93,7 +99,12 @@ const Model = types
       if (self.valuetype === "url") {
         const url = self._value;
         if (!/^https?:\/\//.test(url)) {
-          InfoModal.error(`URL (${url}) is not valid`);
+          const message = [
+            `You should not put text directly in your task data if you use valuetype=url.`,
+            `URL (${url}) is not valid.`,
+          ];
+          if (window.LS_SECURE_MODE) message.unshift(`In SECURE MODE valuetype set to "url" by default.`);
+          InfoModal.error(message.map(t => <p>{t}</p>));
           self.loadedValue("");
           return;
         }
@@ -157,14 +168,17 @@ const Model = types
     },
 
     addRegion(range) {
+      range.start = range.startOffset;
+      range.end = range.endOffset;
+
       const states = self.getAvailableStates();
       if (states.length === 0) return;
 
-      const clonedStates = states.map(s => cloneNode(s));
-
-      const r = self.createRegion({ ...range, states: clonedStates });
-
-      return r;
+      const control = states[0];
+      const labels = { [control.valueType]: control.selectedValues() };
+      const area = self.completion.createResult(range, labels, control, self);
+      area._range = range._range;
+      return area;
     },
 
     /**
@@ -189,10 +203,13 @@ const Model = types
         m = restoreNewsnapshot(fromModel);
         // m.fromStateJSON(obj);
 
-        if (!r) {
+        if (r && fromModel.perregion) {
+          r.states.push(m);
+        } else {
           // tree.states = [m];
           const data = {
             pid: obj.id,
+            parentID: obj.parent_id === null ? "" : obj.parent_id,
             startOffset: start,
             endOffset: end,
             start: "",
@@ -206,8 +223,6 @@ const Model = types
 
           r = self.createRegion(data);
           // r = self.addRegion(tree);
-        } else {
-          r.states.push(m);
         }
       }
 
@@ -303,25 +318,28 @@ class TextPieceView extends Component {
 
   alignRange(r) {
     const item = this.props.item;
+    // there is should be at least one selected label
+    const label = item.activeStates()[0].selectedLabels[0];
+    const granularity = label.granularity || item.granularity;
 
-    if (item.granularity === "symbol") return r;
+    if (granularity === "symbol") return r;
 
     const { start, end } = Utils.HTML.mainOffsets(this.myRef);
 
     // given gobal position and selection node find node
     // with correct position
-    if (item.granularity === "word") {
+    if (granularity === "word") {
       return this.alignWord(r, start, end);
     }
 
-    if (item.granularity === "sentence") {
+    if (granularity === "sentence") {
     }
 
-    if (item.granularity === "paragraph") {
+    if (granularity === "paragraph") {
     }
   }
 
-  captureDocumentSelection() {
+  captureDocumentSelection(ev) {
     var i,
       self = this,
       ranges = [],
@@ -330,6 +348,8 @@ class TextPieceView extends Component {
 
     if (selection.isCollapsed) return [];
 
+    const granularityDisabled = ev.altKey;
+
     for (i = 0; i < selection.rangeCount; i++) {
       var r = selection.getRangeAt(i);
 
@@ -337,7 +357,9 @@ class TextPieceView extends Component {
         r.setEnd(r.startContainer, r.startContainer.length);
       }
 
-      r = this.alignRange(r);
+      if (!granularityDisabled) {
+        r = this.alignRange(r);
+      }
 
       if (r.collapsed || /^\s*$/.test(r.toString())) continue;
 
@@ -390,7 +412,7 @@ class TextPieceView extends Component {
     const states = item.activeStates();
     if (!states || states.length === 0) return;
 
-    var selectedRanges = this.captureDocumentSelection();
+    var selectedRanges = this.captureDocumentSelection(ev);
     if (selectedRanges.length === 0) return;
 
     // prevent overlapping spans from being selected right after this
@@ -407,7 +429,12 @@ class TextPieceView extends Component {
     const root = this.myRef;
     const { item } = this.props;
 
-    item.regions.forEach(function(r) {
+    item.regs.forEach(function(r) {
+      // spans can be totally missed if this is app init or undo/redo
+      // or they can be disconnected from DOM on completions switching
+      // so we have to recreate them from regions data
+      if (r._spans?.[0]?.isConnected) return;
+
       const findNode = (el, pos) => {
         let left = pos;
         const traverse = node => {
@@ -435,8 +462,8 @@ class TextPieceView extends Component {
         return traverse(el);
       };
 
-      const ss = findNode(root, r.startOffset);
-      const ee = findNode(root, r.endOffset);
+      const ss = findNode(root, r.start);
+      const ee = findNode(root, r.end);
 
       // if (! ss || ! ee)
       //     return;
@@ -468,7 +495,7 @@ class TextPieceView extends Component {
     if (!item.loaded) return null;
 
     const val = item._value.split("\n").reduce((res, s, i) => {
-      if (i) res.push(<br />);
+      if (i) res.push(<br key={i} />);
       res.push(s);
       return res;
     }, []);
@@ -495,5 +522,6 @@ const HtxText = inject("store")(observer(HtxTextView));
 const HtxTextPieceView = inject("store")(observer(TextPieceView));
 
 Registry.addTag("text", TextModel, HtxText);
+Registry.addObjectType(TextModel);
 
 export { TextModel, HtxText };

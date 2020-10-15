@@ -1,6 +1,5 @@
 import { types } from "mobx-state-tree";
-import lodash from "../../utils/lodash";
-import { guidGenerator, restoreNewsnapshot } from "../../core/Helpers";
+import isMatch from "lodash.ismatch";
 import InfoModal from "../../components/Infomodal/Infomodal";
 
 const ObjectBase = types
@@ -13,10 +12,10 @@ const ObjectBase = types
       let obj = null;
 
       if (self._regionsCache && self._regionsCache.length) {
-        obj = self._regionsCache.find(({ region }) => lodash.isMatch(region, params));
+        obj = self._regionsCache.find(({ region }) => isMatch(region, params));
       }
 
-      return obj || self.regions.find(r => lodash.isMatch(r, params));
+      return obj || self.regions.find(r => isMatch(r, params));
     },
   }))
   .actions(self => ({
@@ -45,6 +44,7 @@ const ObjectBase = types
     // unselect labels which was exceeded maxUsages
     // return all states left untouched - available labels and others
     function getAvailableStates() {
+      // `checkMaxUsages` may unselect labels with already reached `maxUsages`
       const checkAndCollect = (list, s) => (s.checkMaxUsages ? list.concat(s.checkMaxUsages()) : list);
       const allStates = self.states() || [];
       const exceeded = allStates.reduce(checkAndCollect, []);
@@ -54,7 +54,7 @@ const ObjectBase = types
           const label = exceeded[0];
           InfoModal.warning(`You can't use ${label.value} more than ${label.maxUsages} time(s)`);
         }
-        self.completion.regionStore.unselectAll(true);
+        self.completion.unselectAll();
       }
       return states;
     }

@@ -4,10 +4,10 @@ import * as Tools from "../../tools";
 import Registry from "../../core/Registry";
 import Types from "../../core/Types";
 import ControlBase from "./Base";
+import { customTypes } from "../../core/CustomTypes";
 
 /**
- * KeyPoint tag
- * KeyPoint is used to add a keypoint to an image
+ * KeyPoint is used to add a keypoint to an image without label selection. It's useful when you have only one label.
  * @example
  * <View>
  *   <KeyPoint name="kp-1" toName="img-1" />
@@ -22,19 +22,18 @@ import ControlBase from "./Base";
  * @param {string=} [stokeColor=#8bad00] - keypoint stroke color
  */
 const TagAttrs = types.model({
-  name: types.maybeNull(types.string),
+  name: types.identifier,
   toname: types.maybeNull(types.string),
 
-  opacity: types.optional(types.string, "0.9"),
-  fillcolor: types.optional(types.string, "#8bad00"),
+  opacity: types.optional(customTypes.range(), "0.9"),
+  fillcolor: types.optional(customTypes.color, "#8bad00"),
 
-  strokecolor: types.optional(types.string, "#8bad00"),
+  strokecolor: types.optional(customTypes.color, "#8bad00"),
   strokewidth: types.optional(types.string, "1"),
 });
 
 const Model = types
   .model({
-    id: types.identifier,
     type: "keypoint",
 
     // tools: types.array(BaseTool)
@@ -60,12 +59,7 @@ const Model = types
     },
   }));
 
-const KeyPointModel = types.compose(
-  "KeyPointModel",
-  TagAttrs,
-  Model,
-  ControlBase,
-);
+const KeyPointModel = types.compose("KeyPointModel", TagAttrs, Model, ControlBase);
 
 const HtxView = () => {
   return null;

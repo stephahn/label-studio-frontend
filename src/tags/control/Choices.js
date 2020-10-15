@@ -1,7 +1,7 @@
 import React from "react";
-import { Form } from "antd";
+import { Form, Select } from "antd";
 import { observer } from "mobx-react";
-import { types, getRoot, getParent } from "mobx-state-tree";
+import { types, getRoot } from "mobx-state-tree";
 
 import RequiredMixin from "../../mixins/Required";
 import PerRegionMixin from "../../mixins/PerRegion";
@@ -14,6 +14,8 @@ import Types from "../../core/Types";
 import { ChoiceModel } from "./Choice"; // eslint-disable-line no-unused-vars
 import { guidGenerator } from "../../core/Helpers";
 import ControlBase from "./Base";
+
+const { Option } = Select;
 
 /**
  * Choices tag, create a group of choices, radio, or checkboxes. Shall
@@ -40,22 +42,24 @@ import ControlBase from "./Base";
  * @param {boolean} [perRegion] use this tag for region labeling instead of the whole object labeling
  */
 const TagAttrs = types.model({
-  name: types.string,
+  name: types.identifier,
   toname: types.maybeNull(types.string),
-  showinline: types.optional(types.boolean, false),
+
+  showinline: types.maybeNull(types.boolean),
+
   choice: types.optional(types.enumeration(["single", "single-radio", "multiple"]), "single"),
+
+  layout: types.optional(types.enumeration(["select", "inline", "vertical"]), "vertical"),
 });
 
 const Model = types
   .model({
-    id: types.optional(types.identifier, guidGenerator),
     pid: types.optional(types.string, guidGenerator),
 
     readonly: types.optional(types.boolean, false),
     visible: types.optional(types.boolean, true),
 
     type: "choices",
-    _type: "choices",
     children: Types.unionArray(["choice", "view", "header", "hypertext"]),
   })
   .views(self => ({
@@ -78,6 +82,16 @@ const Model = types
       return null;
     },
 
+    get result() {
+      if (self.perregion) {
+        const area = self.completion.highlightedNode;
+        if (!area) return null;
+
+        return self.completion.results.find(r => r.from_name === self && r.area === area);
+      }
+      return self.completion.results.find(r => r.from_name === self);
+    },
+
     // perChoiceVisible() {
     //     if (! self.whenchoicevalue) return true;
 
@@ -95,6 +109,17 @@ const Model = types
     // }
   }))
   .actions(self => ({
+    afterCreate() {
+      // TODO depricate showInline
+      if (self.showinline === true) self.layout = "inline";
+      if (self.showinline === false) self.layout = "vertical";
+    },
+
+    needsUpdate() {
+      if (self.result) self.setResult(self.result.mainValue);
+      else self.setResult([]);
+    },
+
     requiredModal() {
       InfoModal.warning(self.requiredmessage || `Checkbox "${self.name}" is required.`);
     },
@@ -103,6 +128,37 @@ const Model = types
       choices.selectedValues().forEach(l => {
         self.findLabel(l).setSelected(true);
       });
+    },
+
+    // this is not labels, unselect affects result, so don't unselect on random reason
+    unselectAll() {},
+
+    updateFromResult(value) {
+      self.setResult(Array.isArray(value) ? value : [value]);
+    },
+
+    // unselect only during choice toggle
+    resetSelected() {
+      self.selectedLabels.forEach(c => c.setSelected(false));
+    },
+
+    setResult(values) {
+      self.tiedChildren.forEach(choice => choice.setSelected(values.includes(choice.alias || choice._value)));
+    },
+
+    // update result in the store with current selected choices
+    updateResult() {
+      if (self.result) {
+        self.result.area.setValue(self);
+      } else {
+        if (self.perregion) {
+          const area = self.completion.highlightedNode;
+          if (!area) return null;
+          area.setValue(self);
+        } else {
+          self.completion.createResult({}, { choices: self.selectedValues() }, self, self.toname);
+        }
+      }
     },
 
     toStateJSON() {
@@ -145,29 +201,49 @@ const ChoicesModel = types.compose(
   "ChoicesModel",
   ControlBase,
   TagAttrs,
-  Model,
   SelectedModelMixin.props({ _child: "ChoiceModel" }),
   RequiredMixin,
   PerRegionMixin,
   VisibilityMixin,
+  Model,
 );
 
 const HtxChoices = observer(({ item }) => {
   const style = { marginTop: "1em", marginBottom: "1em" };
-  const region = item.completion.highlightedNode;
   const visibleStyle = item.perRegionVisible() ? {} : { display: "none" };
 
   if (item.isVisible === false) {
-    item.unselectAll();
     visibleStyle["display"] = "none";
   }
 
   return (
     <div style={{ ...style, ...visibleStyle }}>
-      {item.showinline ? (
-        <Form layout="inline">{Tree.renderChildren(item)}</Form>
+      {item.layout === "select" ? (
+        <Select
+          style={{ width: "100%" }}
+          value={item.selectedLabels.map(l => l._value)}
+          mode={item.choice === "multiple" ? "multiple" : ""}
+          onChange={function(val, opt) {
+            if (Array.isArray(val)) {
+              item.resetSelected();
+              val.forEach(v => item.findLabel(v).setSelected(true));
+              item.updateResult();
+            } else {
+              const c = item.findLabel(val);
+              if (c) {
+                c.toggleSelected();
+              }
+            }
+          }}
+        >
+          {item.tiedChildren.map(i => (
+            <Option key={i._value} value={i._value}>
+              {i._value}
+            </Option>
+          ))}
+        </Select>
       ) : (
-        <Form layout="vertical">{Tree.renderChildren(item)}</Form>
+        <Form layout={item.layout}>{Tree.renderChildren(item)}</Form>
       )}
     </div>
   );
